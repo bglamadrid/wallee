@@ -33,6 +33,10 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
+_log() {
+    echo "[wallee.sh] $1"
+}
+
 # this outer construct explained in https://stackoverflow.com/a/169969
 (
 
@@ -44,30 +48,31 @@ fi
     flock -x -w 10 200 || exit 1
 
     # and so it begins
-    DEFAULT_WALLPAPERS="$HOME/pictures/wallpapers"
-    DEFAULT_TIME_MINUTES=5
     DEFAULT_MAX_TRACKED_WALLPAPERS=-1
-    DEFAULT_STATE_DIR="$HOME/.local/share/wallee"
-    FULL_INDEX_FILE="$DEFAULT_STATE_DIR/full_index"
-    AVAILABLE_INDEX_FILE="$DEFAULT_STATE_DIR/available"
-    RECENTLY_USED_INDEX_FILE="$DEFAULT_STATE_DIR/recent"
+    DEFAULT_STATE_DIR='~/.local/share/wallee'
 
+    walls_full_index_filepath="$DEFAULT_STATE_DIR/full_index"
+    available_walls_index_filepath="$DEFAULT_STATE_DIR/available"
+    recent_walls_index_filepath="$DEFAULT_STATE_DIR/recent"
     image_regex='^.*\.(jpe?g|png)$'
-    wallpapers_directory="$DEFAULT_WALLPAPERS"
-    time_interval_seconds=$((DEFAULT_TIME_MINUTES * 60))
-    max_tracked_wallpapers=$DEFAULT_MAX_TRACKED_WALLPAPERS
     how_many_recent_wallpapers=0
     available_wallpaper_file_count=0
     verbose=0
     reset=0
 
-    # parse program options
+    # these we should read from XDG_CONFIG
+    wallpapers_directory=
+    time_interval_seconds=
+    max_tracked_wallpapers=
+
+    ### parsing parameters ###
     arg_i=0
+    longarg=
     shortarg=
     for arg in "$@"; do
         (( arg_i++ ));
         if [ -z "$arg" ]; then continue; fi
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] arg=$arg"; fi
+        if [ $verbose -eq 1 ]; then _log "arg=$arg"; fi
         if [ "$arg" = '-r' ] || [ "$arg" = '--reset' ];
         then
             reset=1
@@ -76,18 +81,18 @@ fi
         if [ "$arg" = '-v' ] || [ "$arg" = '--verbose' ]
         then
             verbose=1
-            echo "[wallee.sh] == VERBOSE MODE =="
+            _log "== VERBOSE MODE =="
             continue
         fi
         if [ "$arg" = '-h' ] || [ "$arg" = '--help' ]; then print_usage_help; exit; fi
-        longarg=$(echo "$arg" | sed -E 's/^--([a-z]{4,})=.+$/\1/; t; Q; p')
+        longarg="$(echo "$arg" | sed -E 's/^--([a-z]{4,})=.+$/\1/; t; Q; p')"
         if [ -n "$longarg" ]
         then
-            longval=$(echo "$arg" | sed -E 's/^--'"$longarg"'=(.+)$/\1/; t; Q; p')
+            longval="$(echo "$arg" | sed -E 's/^--'"$longarg"'=(.+)$/\1/; t; Q; p')"
             if [ $verbose -eq 1 ]
             then
-                echo "[wallee.sh] longarg=$longarg"
-                echo "[wallee.sh] longval=$longval"
+                _log "longarg=$longarg"
+                _log "longval=$longval"
             fi
             case "$longarg" in
             directory)
@@ -107,7 +112,7 @@ fi
             shortarg="$(echo "$arg" | sed -E 's/^-(.)$/\1/; t; Q; p')"
             if [ -z "$shortarg" ]
             then
-                echo '[wallee.sh] ERROR: Parameter order is wrong.'
+                _log 'ERROR: Parameter order is wrong.'
                 exit 1
             fi
             continue
@@ -125,70 +130,69 @@ fi
             esac
             if [ $verbose -eq 1 ]
             then
-                echo "[wallee.sh] shortarg=$shortarg"
-                echo "[wallee.sh] value=$arg"
+                _log "shortarg=$shortarg"
+                _log "value=$arg"
             fi
             shortarg=
         fi
     done
 
-    # debug options
+    ### debug options ###
     if [ $verbose -eq 1 ]
     then
-        echo "[wallee.sh] wallpapers_directory=$wallpapers_directory"
-        echo "[wallee.sh] time_interval_seconds=$time_interval_seconds"
-        echo "[wallee.sh] max_tracked_wallpapers=$max_tracked_wallpapers"
+        _log "wallpapers_directory=$wallpapers_directory"
+        _log "time_interval_seconds=$time_interval_seconds"
+        _log "max_tracked_wallpapers=$max_tracked_wallpapers"
     fi
 
+    ### safeguarding initial program states ###
     if [ ! -d "$DEFAULT_STATE_DIR" ]
     then
         mkdir -p "$DEFAULT_STATE_DIR"
     fi
 
-    if [ ! -f "$FULL_INDEX_FILE" ] || [ ! -s "$FULL_INDEX_FILE" ] || \
-       [ ! -f "$AVAILABLE_INDEX_FILE" ] || \
-       [ ! -f "$RECENTLY_USED_INDEX_FILE" ] || \
+    if [ ! -f "$walls_full_index_filepath" ] || [ ! -s "$walls_full_index_filepath" ] || \
+       [ ! -f "$available_walls_index_filepath" ] || \
+       [ ! -f "$recent_walls_index_filepath" ] || \
        [ $reset -eq 1 ]
     then
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] Creating new cache files"; fi
-        touch "$FULL_INDEX_FILE" \
-              "$AVAILABLE_INDEX_FILE" \
-              "$RECENTLY_USED_INDEX_FILE"
+        if [ $verbose -eq 1 ]; then _log 'Creating new cache files'; fi
+        touch "$walls_full_index_filepath" \
+              "$available_walls_index_filepath" \
+              "$recent_walls_index_filepath"
         # cache all image files in wallpapers directory
         find "$wallpapers_directory" -maxdepth 1 \
                            -type f,l \
                            -regextype egrep \
                            -regex $image_regex \
-                           -printf '%f\n' > "$FULL_INDEX_FILE"
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] Found $(cat "$FULL_INDEX_FILE" | wc -l) wallpaper files"; fi
-        cp "$FULL_INDEX_FILE" "$AVAILABLE_INDEX_FILE"
-        cp /dev/null "$RECENTLY_USED_INDEX_FILE"
+                           -printf '%f\n' > "$walls_full_index_filepath"
+        if [ $verbose -eq 1 ]; then _log "Found $(cat "$walls_full_index_filepath" | wc -l) wallpaper files"; fi
+        cp "$walls_full_index_filepath" "$available_walls_index_filepath"
+        cp /dev/null "$recent_walls_index_filepath"
     fi
 
-    # this array will keep tabs on recent wallpapers
     declare -a recent_wallpapers
-
     # main loop
     while true
     do
         # are there actually any image files to use?
-        available_wallpaper_file_count=$(cat "$AVAILABLE_INDEX_FILE" | wc -l)
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] There are $available_wallpaper_file_count wallpapers available to select"; fi
+        available_wallpaper_file_count=$(cat "$available_walls_index_filepath" | wc -l)
+        if [ $verbose -eq 1 ]; then _log "There are $available_wallpaper_file_count wallpapers available to select"; fi
         if [ $available_wallpaper_file_count -eq 0 ]
         then
-            cp "$FULL_INDEX_FILE" "$AVAILABLE_INDEX_FILE"
-            cp /dev/null "$RECENTLY_USED_INDEX_FILE"
+            cp "$walls_full_index_filepath" "$available_walls_index_filepath"
+            cp /dev/null "$recent_walls_index_filepath"
             continue
         fi
 
-        mapfile -t $recent_wallpapers < "$RECENTLY_USED_INDEX_FILE"
+        mapfile -t $recent_wallpapers < "$recent_walls_index_filepath"
         how_many_recent_wallpapers=${#recent_wallpapers[@]}
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] In recent memory, $how_many_recent_wallpapers wallpapers have been used"; fi
+        if [ $verbose -eq 1 ]; then _log "In recent memory, $how_many_recent_wallpapers wallpapers have been used"; fi
 
         # pick a random wallpaper
         random_index=$((1 + ($RANDOM % $available_wallpaper_file_count)))
-        random_file="$(cat "$AVAILABLE_INDEX_FILE" | head -"$random_index" | tail -1)"
-        if [ $verbose -eq 1 ]; then echo "[wallee.sh] Picked file no. $random_index from available list: $random_file"; fi
+        random_file="$(cat "$available_walls_index_filepath" | head -"$random_index" | tail -1)"
+        if [ $verbose -eq 1 ]; then _log "Picked file no. $random_index from available list: $random_file"; fi
 
         if [ $max_tracked_wallpapers -le -1 ]
         # remember as many wallpapers as there are
@@ -196,15 +200,15 @@ fi
             if [ $how_many_recent_wallpapers -ge $available_wallpaper_file_count ]
             # when there be more wallpapers in memory than in the directory
             then
-                cp "$FULL_INDEX_FILE" "$AVAILABLE_INDEX_FILE"
-                cp /dev/null "$RECENTLY_USED_INDEX_FILE"
+                cp "$walls_full_index_filepath" "$available_walls_index_filepath"
+                cp /dev/null "$recent_walls_index_filepath"
             fi
-            sed -i $random_index'd' "$AVAILABLE_INDEX_FILE"
-            printf "$random_file\n" >> "$RECENTLY_USED_INDEX_FILE"
+            sed -i $random_index'd' "$available_walls_index_filepath"
+            printf "$random_file\n" >> "$recent_walls_index_filepath"
         else
             if [ $how_many_recent_wallpapers -lt $max_tracked_wallpapers ]
             then
-                printf "$random_file\n" >> "$RECENTLY_USED_INDEX_FILE"
+                printf "$random_file\n" >> "$recent_walls_index_filepath"
             else
                 # when max amount of tracked wallpapers has been reached,
                 # keep track FILO-style
@@ -212,11 +216,11 @@ fi
                 while [ $remember_i -gt 0 ]
                 do
                     remember_next=$(( remember_i - 1 ))
-                    recent_wallpapers[$remember_i]=${recent_wallpapers[$remember_next]}
+                    recent_wallpapers[$remember_i]="${recent_wallpapers[$remember_next]}"
                     (( remember_i-- ))
                 done
                 recent_wallpapers[1]="$random_file"
-                printf "%s\n" "${recent_wallpapers[@]}" > "$RECENTLY_USED_INDEX_FILE"
+                printf "%s\n" "${recent_wallpapers[@]}" > "$recent_walls_index_filepath"
             fi
         fi
 
