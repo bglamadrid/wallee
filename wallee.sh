@@ -193,6 +193,13 @@ _log() {
         random_index=$((1 + ($RANDOM % $available_wallpaper_file_count)))
         random_file="$(cat "$available_walls_index_filepath" | head -"$random_index" | tail -1)"
         if [ $verbose -eq 1 ]; then _log "Picked file no. $random_index from available list: $random_file"; fi
+        if [ ! -f "$wallpapers_directory/$random_file" ]
+        then
+            _log "Resetting caches because this wallpaper file does not exist: $random_file"
+            cp "$walls_full_index_filepath" "$available_walls_index_filepath"
+            cp /dev/null "$recent_walls_index_filepath"
+            continue
+        fi
 
         if [ $max_tracked_wallpapers -le -1 ]
         # remember as many wallpapers as there are
