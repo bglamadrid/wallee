@@ -54,7 +54,7 @@ _log() {
 
     # and so it begins
     DEFAULT_MAX_TRACKED_WALLPAPERS=-1
-    DEFAULT_STATE_DIR='~/.local/share/wallee'
+    DEFAULT_STATE_DIR="$HOME/.local/share/wallee"
 
     walls_full_index_filepath="$DEFAULT_STATE_DIR/full_index"
     available_walls_index_filepath="$DEFAULT_STATE_DIR/available"
