@@ -33,6 +33,11 @@ if [ $# -lt 1 ]; then
     exit 1
 fi
 
+if [ -f '/var/lock/wallee.lock' ]
+then
+    exit
+fi
+
 _log() {
     echo "[wallee.sh] $1"
 }
@@ -196,6 +201,12 @@ _log() {
         if [ ! -f "$wallpapers_directory/$random_file" ]
         then
             _log "Resetting caches because this wallpaper file does not exist: $random_file"
+            find "$wallpapers_directory" -maxdepth 1 \
+                               -type f,l \
+                               -regextype egrep \
+                               -regex $image_regex \
+                               -printf '%f\n' > "$walls_full_index_filepath"
+            if [ $verbose -eq 1 ]; then _log "Found $(cat "$walls_full_index_filepath" | wc -l) wallpaper files"; fi
             cp "$walls_full_index_filepath" "$available_walls_index_filepath"
             cp /dev/null "$recent_walls_index_filepath"
             continue
