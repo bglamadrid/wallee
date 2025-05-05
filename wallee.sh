@@ -60,6 +60,8 @@ _log() {
     available_walls_index_filepath="$DEFAULT_STATE_DIR/available"
     recent_walls_index_filepath="$DEFAULT_STATE_DIR/recent"
     image_regex='^.*\.(jpe?g|png)$'
+
+    declare -a recent_wallpapers
     how_many_recent_wallpapers=0
     available_wallpaper_file_count=0
     verbose=0
@@ -176,8 +178,7 @@ _log() {
         cp /dev/null "$recent_walls_index_filepath"
     fi
 
-    declare -a recent_wallpapers
-    # main loop
+    ### main loop ###
     while true
     do
         # are there actually any image files to use?
